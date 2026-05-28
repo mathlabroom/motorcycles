@@ -1,0 +1,58 @@
+name: HSCK_Test_Run
+
+on:
+  schedule:
+    # 含义：每隔 6 小时的第 30 分钟执行
+    - cron: '33 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 
+
+      - name: 获取北京时间日期
+        # 在最开始就准备好变量
+        run: echo "CURRENT_DATE=$(TZ='Asia/Shanghai' date +'%y%m%d')" >> $GITHUB_ENV
+
+      - name: 安装 Python 环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 安装依赖
+        run: pip install requests beautifulsoup4
+
+      - name: 运行收割脚本
+        env:
+          # 这行是将刚才保险柜里的 PUSH_KEY 读取出来，映射成系统的环境变量
+          PUSH_KEY: ${{ secrets.PUSH_KEY }}
+        run: python main.py
+
+      - name: Final Push changes
+        if: always()
+        run: |
+          # 基础配置
+          git config --global http.postBuffer 524288000
+          git config --global http.lowSpeedLimit 0
+          git config --global http.lowSpeedTime 999999
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # 1. 添加所有更改
+          git add .
+          
+          # 2. 使用环境变量中的日期进行提交
+          # 如果 main.py 内部已经 push 过，这里最后收尾只需提交剩余部分
+          git commit -m "Auto commit: ${{ env.CURRENT_DATE }}" || echo "No changes to commit"
+
+          # 3. 拉取最新的远程改动（防止冲突）并推送
+          git pull origin main --rebase
+          git push origin main
