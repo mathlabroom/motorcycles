@@ -109,10 +109,12 @@ def crawl_category(cat, session, base_url, stop_days):
     print(f"\n📂 启动新站分类: 【{cat_name}】(ID: {cat_id}) | 库内: {len(db_set)}")
     stats = {"new": 0, "existed": len(db_set)}
     all_new_entries = []
-    # 💡 修正：直接使用外面主程序传进来的真正 stop_days 参数（也就是你设置的 10000）
+    
+    # 🎯 核心修复 1：使用传进来的真实 stop_days (10000) 来计算阈值
     stop_date_threshold = (datetime.now() - timedelta(days=stop_days)).strftime("%m-%d")
 
-    # 💡 强力保险：如果你设置了要洗劫全站（比如大于 365 天），直接让截止线失效，永远不因为日期而刹车
+    # 🎯 核心修复 2：强力保险！如果天数设置大于一年，直接将截止日期抹平为 "00-00"
+    # 这样新站遇到任何历史日期 (比如 05-26) 都绝对不会再误触发踩刹车
     if stop_days > 365:
         stop_date_threshold = "00-00"
 
