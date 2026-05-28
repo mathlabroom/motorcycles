@@ -162,11 +162,13 @@ def crawl_category(cat, session, base_url, stop_days):
                             date_val = date_matches[-1]
 
                     # --- 截止判定 ---
-                    if p > 3 and date_val != "01-01":
-                        if date_val < stop_date_threshold:
-                            print(f"⏱️ 探测到旧日期 {date_val}，达到截止阈值。")
-                            found_old_content = True
-                            break
+                    # --- 截止判定（全量模式直接放行，永不刹车） ---
+                    # if p > 3 and date_val != "01-01":
+                    #     if date_val < stop_date_threshold:
+                    #         print(f"⏱️ 探测到旧日期 {date_val}，达到截止阈值。")
+                    #         found_old_content = True
+                    #         break
+                    pass  # 💡 占个位，直接无视时间，让它继续往下死磕
 
                     # --- 去重判定 ---
                     v_id_match = re.search(r'id/(\d+)', href)
