@@ -181,10 +181,6 @@ def crawl_category(cat, session, base_url, stop_days):
                     try:
                         play_link = urllib.parse.urljoin(base_url, href)
                         p_res = session.get(play_link, timeout=12)
-                        
-                        # 防暴破减速带
-                        time.sleep(random.uniform(0.4, 0.9))
-                        
                         # 🎯 直接提取 player_data 的明文 m3u8 地址
                         m3u8_json_match = re.search(r'player_data\s*=\s*(\{.*?\})', p_res.text)
                         if m3u8_json_match:
