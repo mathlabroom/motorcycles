@@ -340,12 +340,28 @@ if __name__ == "__main__":
     finally:
         print(f"\n{'='*30}\n收割总结 (今日日期: {datetime.now().strftime('%m-%d')})\n{'='*30}")
         
-        # 触发转换程序
+        # 无论如何都尝试生成一次 Bouquet 并压缩成 gz
         try:
             convert_to_e2_bouquets()
+            
+            # ===== 🎯 纯功能：新增 .tv 自动压缩成 .gz 逻辑 =====
+            import gzip
+            E2_DIR = './E2_Bouquets'
+            if os.path.exists(E2_DIR):
+                for file_name in os.listdir(E2_DIR):
+                    if file_name.endswith('.tv'):
+                        tv_path = os.path.join(E2_DIR, file_name)
+                        gz_path = tv_path + '.gz'
+                        with open(tv_path, 'rb') as f_in:
+                            with gzip.open(gz_path, 'wb') as f_out:
+                                f_out.writelines(f_in)
+                print("🗜️ [压缩成功] E2_Bouquets 目录下的 .tv 文件已全部同步生成 .tv.gz")
+            # ===================================================
+            
         except Exception as e:
-            print(f"⚠️ E2 节目单转换失败: {e}")
+            print(f"⚠️ E2 节目单转换或压缩失败: {e}")
 
+        # 汇总报告与强制同步
         if 'report' in locals() and report:
             total_all = sum(r.get('new', 0) for r in report if isinstance(r, dict))
             summary_text = "\n".join([f"- {r['name']}: +{r['new']}" for r in report])
@@ -353,14 +369,19 @@ if __name__ == "__main__":
             print(f"📊 详细汇总:\n{summary_text}")
             
             if total_all > 0:
+                # 微信推送依然只在 Actions 云端触发，防止本地运行轰炸微信
                 if os.getenv("GITHUB_ACTIONS") == "true":
-                    msg_title = f"🚀 今日【新站】收割完成！新增 {total_all} 条"
-                    msg_content = f"### 📥 新站自动收割汇总\n\n{summary_text}\n\n---\n📅 结束时间：{datetime.now().strftime('%m-%d %H:%M')}"
+                    msg_title = f"🚀 今日收割完成！新增 {total_all} 条"
+                    msg_content = f"### 📥 自动收割汇总\n\n{summary_text}\n\n---\n📅 结束时间：{datetime.now().strftime('%m-%d %H:%M')}"
                     send_wechat(msg_title, msg_content)
-                    git_push_backup(total_all)
                 else:
-                    print(f"🏠 本地运行结束，今日新站斩获 {total_all} 条。")
+                    print(f"🏠 本地运行检测到新数据...")
+
+                # 🎯 核心修正：挪出判断，无论本地还是 Actions 跑，只要有新资源，就铁定强制提交备份推送！
+                git_push_backup(total_all)
+            else:
+                print("ℹ️ 库内无数据更新，跳过同步。")
         else:
-            print("ℹ️ 任务结束，未生成新数据报告。")
+            print("ℹ️ 任务结束，未生成有效报告。")
 
         print(f"✅ 流程全部结束，耗时: {time.time()-start_time:.1f}s")
