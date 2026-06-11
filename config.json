@@ -13,5 +13,5 @@
         {"id": "29", "name": "三级伦理"},
         {"id": "30", "name": "动漫精品"}
     ],
-    "STOP_DAYS_AGO": 10000
+    "STOP_DAYS_AGO": 2
 }
