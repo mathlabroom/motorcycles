@@ -229,8 +229,8 @@ def crawl_category(cat, session, base_url, stop_days):
     return stats
 
 
-# --- 5. E2 Bouquet 转换 ---
-def convert_to_e2_bouquets():
+# --- 5. E2 Bouquet 转换（按需精准增量版） ---
+def convert_to_e2_bouquets(report_list=None):
     BASE_DIR = './VideoResults'
     OUTPUT_DIR = './E2_Bouquets'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -238,9 +238,25 @@ def convert_to_e2_bouquets():
     if not os.path.exists(BASE_DIR): return
     categories = [d for d in os.listdir(BASE_DIR) if os.path.isdir(os.path.join(BASE_DIR, d))]
 
+    # 把报告转换成字典，如 {"国产自拍": 0, "日本AV": 5}
+    report_dict = {r['name']: r.get('new', 0) for r in report_list if isinstance(r, dict)} if report_list else {}
+
+    import gzip
+
     for idx, cat_name in enumerate(categories):
         m3u8_path = os.path.join(BASE_DIR, cat_name, f"{cat_name}.m3u8")
         if not os.path.exists(m3u8_path): continue
+        
+        tv_path = os.path.join(OUTPUT_DIR, f"subbouquet.{cat_name}.tv")
+        gz_path = tv_path + '.gz'
+        
+        # 🎯 【精准拦截点】如果该分类今日更新数为 0，且本地已有打包好的 .tv.gz，直接躺平略过
+        if report_dict.get(cat_name, 0) == 0 and os.path.exists(gz_path):
+            print(f"      ℹ️ 分类【{cat_name}】今日无新增，完美跳过 E2 转换与打包。")
+            continue
+
+        # 只有真正有新增资源的分类，才会执行刷新
+        print(f"      🗜️ 分类【{cat_name}】探测到新资源，正在刷新 .tv 并重新打包 .tv.gz...")
         with open(m3u8_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
@@ -263,11 +279,16 @@ def convert_to_e2_bouquets():
                 output_lines.append(f"#DESCRIPTION {title}")
                 sid += 1
         
-        output_path = os.path.join(OUTPUT_DIR, f"subbouquet.{cat_name}.tv")
-        with open(output_path, 'w', encoding='utf-8') as f:
+        # 写入当前分类的 .tv 文件
+        with open(tv_path, 'w', encoding='utf-8') as f:
             f.write("\n".join(output_lines) + "\n")
             
-    print(f"📺 [E2 转换成功] 已在 {OUTPUT_DIR} 目录下生成对应的机顶盒电视节目单！")
+        # 顺手把当前变动的 .tv 打包成 .tv.gz（解决时间戳导致的无意义大面积刷新）
+        with open(tv_path, 'rb') as f_in:
+            with gzip.open(gz_path, 'wb') as f_out:
+                f_out.writelines(f_in)
+            
+    print(f"📺 [E2 转换成功] 已在 {OUTPUT_DIR} 目录下精准同步了变动分类的电视节目单！")
 
 
 # --- 6. 新站配置独立加载函数 ---
@@ -340,48 +361,36 @@ if __name__ == "__main__":
     finally:
         print(f"\n{'='*30}\n收割总结 (今日日期: {datetime.now().strftime('%m-%d')})\n{'='*30}")
         
-        # 无论如何都尝试生成一次 Bouquet 并压缩成 gz
-        try:
-            convert_to_e2_bouquets()
-            
-            # ===== 🎯 纯功能：新增 .tv 自动压缩成 .gz 逻辑 =====
-            import gzip
-            E2_DIR = './E2_Bouquets'
-            if os.path.exists(E2_DIR):
-                for file_name in os.listdir(E2_DIR):
-                    if file_name.endswith('.tv'):
-                        tv_path = os.path.join(E2_DIR, file_name)
-                        gz_path = tv_path + '.gz'
-                        with open(tv_path, 'rb') as f_in:
-                            with gzip.open(gz_path, 'wb') as f_out:
-                                f_out.writelines(f_in)
-                print("🗜️ [压缩成功] E2_Bouquets 目录下的 .tv 文件已全部同步生成 .tv.gz")
-            # ===================================================
-            
-        except Exception as e:
-            print(f"⚠️ E2 节目单转换或压缩失败: {e}")
+        # 统计所有分类今日新捞到的资源总数
+        total_all = sum(r.get('new', 0) for r in report if isinstance(r, dict)) if 'report' in locals() and report else 0
+        summary_text = "\n".join([f"- {r['name']}: +{r['new']}" for r in report]) if 'report' in locals() and report else ""
 
-        # 汇总报告与强制同步
-        if 'report' in locals() and report:
-            total_all = sum(r.get('new', 0) for r in report if isinstance(r, dict))
-            summary_text = "\n".join([f"- {r['name']}: +{r['new']}" for r in report])
-            
-            print(f"📊 详细汇总:\n{summary_text}")
-            
-            if total_all > 0:
-                # 微信推送依然只在 Actions 云端触发，防止本地运行轰炸微信
-                if os.getenv("GITHUB_ACTIONS") == "true":
-                    msg_title = f"🚀 今日收割完成！新增 {total_all} 条"
-                    msg_content = f"### 📥 自动收割汇总\n\n{summary_text}\n\n---\n📅 结束时间：{datetime.now().strftime('%m-%d %H:%M')}"
-                    send_wechat(msg_title, msg_content)
-                else:
-                    print(f"🏠 本地运行检测到新数据...")
+        # 🎯 【核心修正】只有今天确实捞到新货了，才启动转换流程
+        if total_all > 0:
+            print("🔄 正在启动【新站】按需精准增量打包...")
+            try:
+                # 传入今日战果，内部自动判定谁更新谁躺平
+                convert_to_e2_bouquets(report)
+            except Exception as e:
+                print(f"⚠️ E2 精准转换或压缩失败: {e}")
 
-                # 🎯 核心修正：挪出判断，无论本地还是 Actions 跑，只要有新资源，就铁定强制提交备份推送！
-                git_push_backup(total_all)
+            print(f"\n📊 详细汇总:\n{summary_text}")
+            
+            # 微信通知（仅限云端 Actions 触发）
+            if os.getenv("GITHUB_ACTIONS") == "true":
+                msg_title = f"🚀 今日【新站】收割完成！新增 {total_all} 条"
+                msg_content = f"### 📥 自动收割汇总\n\n{summary_text}\n\n---\n📅 结束时间：{datetime.now().strftime('%m-%d %H:%M')}"
+                send_wechat(msg_title, msg_content)
             else:
-                print("ℹ️ 库内无数据更新，跳过同步。")
+                print(f"🏠 本地运行检测到新数据...")
+
+            # 有新货，铁定强制备份推送
+            git_push_backup(total_all)
+            
         else:
-            print("ℹ️ 任务结束，未生成有效报告。")
+            # 💤 如果今天什么都没捞到，全部就地躺平，拒绝重写任何文件
+            if 'report' in locals() and report:
+                print("\n".join([f"- {r['name']}: 0" for r in report]))
+            print("\nℹ️ 库内无任何数据更新，新站全量躺平，跳过所有写入、压缩与 Git 同步。")
 
         print(f"✅ 流程全部结束，耗时: {time.time()-start_time:.1f}s")
