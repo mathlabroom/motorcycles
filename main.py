@@ -89,7 +89,7 @@ def save_and_update(path, new_lines, db_list, db_path):
         f.write("#EXTM3U\n")
         for k in sorted_keys:
             f.write(items_dict[k] + "\n")
-    
+    import gzip
     gz_m3u8_path = path + ".gz"
     try:
         with open(path, 'rb') as f_in:
