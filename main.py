@@ -90,6 +90,15 @@ def save_and_update(path, new_lines, db_list, db_path):
         for k in sorted_keys:
             f.write(items_dict[k] + "\n")
     
+    gz_m3u8_path = path + ".gz"
+    try:
+        with open(path, 'rb') as f_in:
+            with gzip.open(gz_m3u8_path, 'wb') as f_out:
+                f_out.writelines(f_in)
+        print(f"      🗜️ 列表【{os.path.basename(path)}】已成功额外打包为 .gz 压缩源文件。")
+    except Exception as e:
+        print(f"      ⚠️ 压缩 .m3u8.gz 失败: {str(e)}")
+        
     # 更新 JSON 数据库
     with open(db_path, 'w', encoding='utf-8') as f:
         json.dump(db_list, f, ensure_ascii=False, indent=4)
