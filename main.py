@@ -238,64 +238,82 @@ def crawl_category(cat, session, base_url, stop_days):
     return stats
 
 
-# --- 5. E2 Bouquet 转换（按需精准增量版） ---
+# --- 5. E2 Bouquet 转换（按需精准增量版 - 修复版） ---
 def convert_to_e2_bouquets(report_list=None):
     BASE_DIR = './VideoResults'
     OUTPUT_DIR = './E2_Bouquets'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    if not os.path.exists(BASE_DIR): return
-    categories = [d for d in os.listdir(BASE_DIR) if os.path.isdir(os.path.join(BASE_DIR, d))]
+    if not os.path.exists(BASE_DIR): 
+        print("⚠️ 未找到 VideoResults 目录，取消转换")
+        return
+
+    # 🎯 修复点 1：直接扫描 VideoResults 目录下的所有 .m3u8 文件
+    m3u8_files = [f for f in os.listdir(BASE_DIR) if f.endswith(".m3u8")]
+    if not m3u8_files:
+        print("⚠️ VideoResults 目录下未发现任何 .m3u8 文件")
+        return
 
     # 把报告转换成字典，如 {"国产自拍": 0, "日本AV": 5}
     report_dict = {r['name']: r.get('new', 0) for r in report_list if isinstance(r, dict)} if report_list else {}
 
     import gzip
 
-    for idx, cat_name in enumerate(categories):
-        m3u8_path = os.path.join(BASE_DIR, cat_name, f"{cat_name}.m3u8")
-        if not os.path.exists(m3u8_path): continue
+    for idx, m3u8_file in enumerate(m3u8_files):
+        cat_name = m3u8_file.replace(".m3u8", "")
+        m3u8_path = os.path.join(BASE_DIR, m3u8_file)
         
         tv_path = os.path.join(OUTPUT_DIR, f"subbouquet.{cat_name}.tv")
         gz_path = tv_path + '.gz'
         
-        # 🎯 【精准拦截点】如果该分类今日更新数为 0，且本地已有打包好的 .tv.gz，直接躺平略过
+        # 🎯 【精准拦截点】如果该分类今日更新数为 0，且本地已有打包好的 .tv.gz，直接略过
         if report_dict.get(cat_name, 0) == 0 and os.path.exists(gz_path):
             print(f"      ℹ️ 分类【{cat_name}】今日无新增，完美跳过 E2 转换与打包。")
             continue
 
         # 只有真正有新增资源的分类，才会执行刷新
         print(f"      🗜️ 分类【{cat_name}】探测到新资源，正在刷新 .tv 并重新打包 .tv.gz...")
-        with open(m3u8_path, 'r', encoding='utf-8') as f:
-            content = f.read()
         
-        items = content.split("#EXTINF")
         output_lines = [f"#NAME {cat_name}"]
-        
         sid = 1
         hex_id = hex(200 + idx)[2:].upper() 
         
-        for item in items:
-            if not item.strip(): continue
-            lines = item.strip().split('\n')
-            title = lines[0].split(',')[-1].strip()
-            url = lines[-1].strip()
-            
-            if url.startswith('http'):
-                h_sid = hex(sid)[2:].upper().zfill(4)
-                escaped_url = url.replace(':', '%3a')
-                output_lines.append(f"#SERVICE 4097:0:1:{h_sid}:{hex_id}:0:0:0:0:0:{escaped_url}:{title}")
-                output_lines.append(f"#DESCRIPTION {title}")
-                sid += 1
-        
-        # 写入当前分类的 .tv 文件
-        with open(tv_path, 'w', encoding='utf-8') as f:
-            f.write("\n".join(output_lines) + "\n")
-            
-        # 顺手把当前变动的 .tv 打包成 .tv.gz（解决时间戳导致的无意义大面积刷新）
-        with open(tv_path, 'rb') as f_in:
-            with gzip.open(gz_path, 'wb') as f_out:
-                f_out.writelines(f_in)
+        # 🎯 修复点 2：极其健壮的逐行解析，替换原有的不安全 split 方案
+        try:
+            with open(m3u8_path, 'r', encoding='utf-8', errors='ignore') as f:
+                current_title = "未命名频道"
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#EXTM3U"):
+                        continue
+                    
+                    if line.startswith("#EXTINF:"):
+                        # 提取频道名称
+                        parts = line.split(",", 1)
+                        if len(parts) > 1:
+                            # 过滤掉 EXTINF 属性，只保留纯频道名
+                            current_title = parts[1].strip()
+                    elif line.startswith("http"):
+                        url = line
+                        h_sid = hex(sid)[2:].upper().zfill(4)
+                        escaped_url = url.replace(':', '%3a').replace('%3A', '%3a')
+                        
+                        output_lines.append(f"#SERVICE 4097:0:1:{h_sid}:{hex_id}:0:0:0:0:0:{escaped_url}:{current_title}")
+                        output_lines.append(f"#DESCRIPTION {current_title}")
+                        sid += 1
+                        current_title = "未命名频道"  # 重置
+
+            # 写入当前分类的 .tv 文件
+            with open(tv_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(output_lines) + "\n")
+                
+            # 顺手把当前变动的 .tv 打包成符合标准的 .tv.gz（解决 7-zip 造成的非标准头问题）
+            with open(tv_path, 'rb') as f_in:
+                with gzip.open(gz_path, 'wb', compresslevel=9) as f_out:
+                    f_out.writelines(f_in)
+                    
+        except Exception as e:
+            print(f"      ❌ 分类【{cat_name}】转换/打包失败: {e}")
             
     print(f"📺 [E2 转换成功] 已在 {OUTPUT_DIR} 目录下精准同步了变动分类的电视节目单！")
 
